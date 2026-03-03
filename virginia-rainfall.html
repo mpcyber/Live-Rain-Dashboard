@@ -1,0 +1,669 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Virginia Rainfall Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Josefin+Slab:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+  :root {
+    --bg:#0a0e1a; --surface:#111827; --border:#1e2d45;
+    --accent:#00d4ff; --flood:#ff4757;
+    --text:#e2e8f0; --muted:#64748b; --green:#00ff9d;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;min-height:100vh;overflow-x:hidden;}
+  body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
+    background-image:linear-gradient(rgba(0,212,255,0.025) 1px,transparent 1px),linear-gradient(90deg,rgba(0,212,255,0.025) 1px,transparent 1px);
+    background-size:40px 40px;}
+  .shell{position:relative;z-index:1;display:flex;flex-direction:column;min-height:100vh;}
+
+  header{padding:14px 24px;display:flex;align-items:center;justify-content:space-between;
+    border-bottom:1px solid var(--border);background:rgba(10,14,26,0.92);
+    backdrop-filter:blur(12px);position:sticky;top:0;z-index:999;}
+  .logo-block{display:flex;align-items:center;gap:12px;}
+  .logo-icon{width:36px;height:36px;border:1.5px solid var(--accent);border-radius:8px;
+    display:flex;align-items:center;justify-content:center;font-size:17px;
+    animation:pulse-border 3s ease-in-out infinite;}
+  @keyframes pulse-border{0%,100%{box-shadow:0 0 12px rgba(0,212,255,0.25)}50%{box-shadow:0 0 24px rgba(0,212,255,0.55)}}
+  .logo-text{font-family:'Josefin Slab',serif;font-size:1.05rem;font-weight:700;letter-spacing:0.14em;color:var(--text);}
+  .logo-sub{font-family:'Inter',sans-serif;font-size:0.6rem;color:var(--muted);letter-spacing:0.15em;text-transform:uppercase;}
+  .header-right{display:flex;align-items:center;gap:16px;flex-wrap:wrap;}
+  .status-chip{font-family:'Inter',sans-serif;font-size:0.68rem;padding:4px 10px;
+    border-radius:20px;border:1px solid var(--border);color:var(--muted);display:flex;align-items:center;gap:5px;}
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--green);animation:blink 1.5s ease-in-out infinite;}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:0.25}}
+  #last-updated{font-family:'Inter',sans-serif;font-size:0.62rem;color:var(--muted);}
+  .refresh-btn{font-family:'Inter',sans-serif;font-size:0.68rem;background:transparent;
+    border:1px solid var(--border);color:var(--muted);padding:5px 12px;border-radius:6px;
+    cursor:pointer;transition:all 0.2s;display:flex;align-items:center;gap:5px;}
+  .refresh-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .refresh-btn.spinning svg{animation:spin 0.8s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+
+  .main{display:grid;grid-template-columns:320px 1fr;flex:1;}
+  .sidebar{background:var(--surface);border-right:1px solid var(--border);
+    display:flex;flex-direction:column;overflow-y:auto;
+    max-height:calc(100vh - 61px);position:sticky;top:61px;}
+  .s-sec{padding:16px 18px;border-bottom:1px solid var(--border);}
+  .s-sec h3{font-family:'Inter',sans-serif;font-size:0.6rem;letter-spacing:0.2em;
+    text-transform:uppercase;color:var(--muted);margin-bottom:12px;}
+  .stat-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+  .stat-card{background:rgba(0,0,0,0.3);border:1px solid var(--border);border-radius:7px;padding:12px;}
+  .stat-card .val{font-family:'Inter',sans-serif;font-size:1.4rem;font-weight:700;color:var(--accent);line-height:1;}
+  .stat-card .val.red{color:var(--flood);}
+  .stat-card .lbl{font-size:0.68rem;color:var(--muted);margin-top:3px;}
+
+  .alert-list{display:flex;flex-direction:column;gap:7px;}
+  .alert-item{background:rgba(255,71,87,0.07);border:1px solid rgba(255,71,87,0.25);
+    border-left:3px solid var(--flood);border-radius:6px;padding:9px 11px;font-size:0.78rem;}
+  .alert-county{font-weight:700;font-size:0.82rem;color:var(--flood);}
+  .alert-event{color:var(--text);margin-top:2px;line-height:1.4;}
+  .alert-expires{font-family:'Inter',sans-serif;font-size:0.62rem;color:var(--muted);margin-top:4px;}
+  .no-alerts{font-family:'Inter',sans-serif;font-size:0.72rem;color:var(--green);
+    text-align:center;padding:14px;border:1px dashed rgba(0,255,157,0.3);border-radius:6px;}
+
+  .rain-list{display:flex;flex-direction:column;gap:5px;}
+  .rain-item{display:flex;align-items:center;gap:8px;padding:7px 9px;
+    background:rgba(0,0,0,0.2);border-radius:6px;border:1px solid var(--border);
+    cursor:pointer;transition:all 0.18s;}
+  .rain-item:hover{border-color:var(--accent);background:rgba(0,212,255,0.04);}
+  .rain-item.has-flood{border-color:rgba(255,71,87,0.35);}
+  .rain-rank{font-family:'Inter',sans-serif;font-size:0.62rem;color:var(--muted);width:16px;text-align:right;flex-shrink:0;}
+  .rain-bar-wrap{flex:1;}
+  .rain-county-name{font-size:0.76rem;font-weight:600;margin-bottom:3px;}
+  .rain-bar-bg{height:3px;background:rgba(255,255,255,0.06);border-radius:2px;overflow:hidden;}
+  .rain-bar-fill{height:100%;border-radius:2px;transition:width 0.9s cubic-bezier(0.4,0,0.2,1);}
+  .rain-val{font-family:'Inter',sans-serif;font-size:0.7rem;color:var(--accent);flex-shrink:0;min-width:44px;text-align:right;}
+  .flood-badge{font-size:0.58rem;background:var(--flood);color:#fff;border-radius:3px;
+    padding:1px 5px;font-family:'Inter',sans-serif;font-weight:700;flex-shrink:0;}
+
+  .map-area{display:flex;flex-direction:column;}
+  .map-toolbar{padding:12px 18px;display:flex;align-items:center;justify-content:space-between;
+    border-bottom:1px solid var(--border);gap:12px;flex-wrap:wrap;}
+  .map-title{font-family:'Josefin Slab',serif;font-size:0.95rem;font-weight:700;letter-spacing:0.1em;color:var(--text);}
+  .legend{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+  .legend-item{display:flex;align-items:center;gap:4px;font-size:0.68rem;color:var(--muted);}
+  .legend-swatch{width:12px;height:12px;border-radius:3px;}
+  #map{flex:1;min-height:calc(100vh - 110px);}
+
+  .leaflet-container{background:var(--bg) !important;}
+  .leaflet-control-zoom{border:1px solid var(--border) !important;}
+  .leaflet-control-zoom a{background:var(--surface) !important;color:var(--text) !important;border-bottom:1px solid var(--border) !important;}
+  .leaflet-control-zoom a:hover{background:var(--border) !important;}
+  .leaflet-control-attribution{background:rgba(10,14,26,0.8) !important;color:var(--muted) !important;font-size:9px !important;}
+  .leaflet-control-attribution a{color:var(--accent) !important;}
+
+  .loading-overlay{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;
+    align-items:center;justify-content:center;z-index:9999;transition:opacity 0.5s;}
+  .loading-overlay.hidden{opacity:0;pointer-events:none;}
+  .loader-ring{width:56px;height:56px;border-radius:50%;border:2px solid var(--border);
+    border-top-color:var(--accent);animation:spin 0.85s linear infinite;margin-bottom:18px;}
+  .loader-text{font-family:'Inter',sans-serif;font-size:0.72rem;color:var(--muted);
+    text-align:center;max-width:300px;line-height:1.8;}
+  #loader-status{color:var(--accent);}
+
+  @media(max-width:860px){
+    .main{grid-template-columns:1fr;}
+    .sidebar{max-height:none;position:static;}
+    #map{min-height:380px;}
+  }
+</style>
+</head>
+<body>
+<div class="loading-overlay" id="loader">
+  <div class="loader-ring"></div>
+  <div class="loader-text">
+    Fetching live Virginia precipitation<br>
+    <span id="loader-status">Connecting...</span>
+  </div>
+</div>
+
+<div class="shell">
+  <header>
+    <div class="logo-block">
+      <div class="logo-icon">🌧</div>
+      <div>
+        <div class="logo-text">VA RAINFALL MONITOR</div>
+        <div class="logo-sub">NOAA · NWS · Live Data</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="status-chip"><span class="dot" id="status-dot"></span><span id="status-label">Loading</span></div>
+      <span id="last-updated"></span>
+      <button class="refresh-btn" id="refresh-btn" onclick="loadData()">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>
+        </svg>
+        Refresh
+      </button>
+    </div>
+  </header>
+
+  <div class="main">
+    <aside class="sidebar">
+      <div class="s-sec">
+        <h3>Summary</h3>
+        <div class="stat-row">
+          <div class="stat-card"><div class="val" id="stat-counties">95</div><div class="lbl">Counties</div></div>
+          <div class="stat-card"><div class="val red" id="stat-alerts">—</div><div class="lbl">Flood alerts</div></div>
+          <div class="stat-card"><div class="val" id="stat-max">—</div><div class="lbl">Max rainfall</div></div>
+          <div class="stat-card"><div class="val" id="stat-avg">—</div><div class="lbl">Avg rainfall</div></div>
+          <div class="stat-card" style="grid-column:1/-1"><div class="val" id="stat-next" style="font-size:1rem;">—</div><div class="lbl">Next predicted precipitation</div></div>
+        </div>
+      </div>
+      <div class="s-sec">
+        <h3 id="alert-section-title">⚠ Flash Flood Warnings</h3>
+        <div id="alert-list" class="alert-list">
+          <div class="no-alerts">Checking alerts...</div>
+        </div>
+      </div>
+      <div class="s-sec" style="flex:1">
+        <h3 id="list-title">Top Counties · Rainfall</h3>
+        <div id="rain-list" class="rain-list">
+          <div style="font-family:'Inter',sans-serif;font-size:0.7rem;color:var(--muted);padding:14px 0">Fetching data...</div>
+        </div>
+      </div>
+    </aside>
+
+    <div class="map-area">
+      <div class="map-toolbar">
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+          <div class="map-title">Virginia Precipitation Map <span id="event-label" style="font-weight:400;color:var(--muted)">· Loading...</span></div>
+        </div>
+        <div class="legend" id="map-legend">
+          <div class="legend-item"><div class="legend-swatch" style="background:#1a2535"></div>No data</div>
+          <div class="legend-item"><div class="legend-swatch" style="background:#1a3a5c"></div>Trace</div>
+          <div class="legend-item"><div class="legend-swatch" style="background:#0077b6"></div>Light</div>
+          <div class="legend-item"><div class="legend-swatch" style="background:#00b4d8"></div>Moderate</div>
+          <div class="legend-item"><div class="legend-swatch" style="background:#90e0ef"></div>Heavy</div>
+          <div class="legend-item"><div class="legend-swatch" style="background:#ff4757"></div>⚠ Flood</div>
+        </div>
+      </div>
+      <div id="map"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+let VA_GEOJSON = null;
+
+function dpSimplify(pts, eps) {
+  if (pts.length < 3) return pts;
+  let md = 0, mi = 0;
+  const [x1,y1] = pts[0], [x2,y2] = pts[pts.length-1];
+  const dx = x2-x1, dy = y2-y1, len2 = dx*dx+dy*dy;
+  for (let i = 1; i < pts.length-1; i++) {
+    const [px,py] = pts[i];
+    let d;
+    if (len2 === 0) { d = Math.sqrt((px-x1)**2+(py-y1)**2); }
+    else { const t = Math.max(0,Math.min(1,((px-x1)*dx+(py-y1)*dy)/len2)); d = Math.sqrt((px-x1-t*dx)**2+(py-y1-t*dy)**2); }
+    if (d > md) { md = d; mi = i; }
+  }
+  if (md > eps) return [...dpSimplify(pts.slice(0,mi+1),eps).slice(0,-1), ...dpSimplify(pts.slice(mi),eps)];
+  return [pts[0], pts[pts.length-1]];
+}
+
+function simplifyGeojson(gj, eps=0.001) {
+  gj.features.forEach(f => {
+    const g = f.geometry;
+    if (g.type === 'Polygon') g.coordinates = g.coordinates.map(r => dpSimplify(r, eps));
+    else if (g.type === 'MultiPolygon') g.coordinates = g.coordinates.map(p => p.map(r => dpSimplify(r, eps)));
+  });
+  return gj;
+}
+
+async function fetchCountyBoundaries() {
+  const sources = [
+    "https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json",
+    "https://eric.clst.org/assets/wiki/uploads/Stuff/gz_2010_us_050_00_500k.json",
+    "https://raw.githubusercontent.com/deldersveld/topojson/master/countries/us-states/VA-51-virginia-counties.json",
+  ];
+
+  try {
+    setLoader("Fetching Census county boundaries (source 1)...");
+    const res = await fetch(sources[0]);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const all = await res.json();
+    const va = {
+      type: "FeatureCollection",
+      features: all.features.filter(f => {
+        const id = f.id || f.properties.FIPS || f.properties.fips || "";
+        return String(id).startsWith("51");
+      })
+    };
+    if (va.features.length > 50) {
+      va.features.forEach(f => {
+        if (!f.id) f.id = f.properties.FIPS || f.properties.fips || f.properties.STATE + f.properties.COUNTY;
+      });
+      return simplifyGeojson(va, 0.001);
+    }
+    throw new Error("Too few features: " + va.features.length);
+  } catch(e) { console.warn("Source 1 failed:", e.message); }
+
+  try {
+    setLoader("Fetching Census county boundaries (source 2)...");
+    const res = await fetch(sources[1]);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const all = await res.json();
+    const va = {
+      type: "FeatureCollection",
+      features: all.features.filter(f => {
+        const p = f.properties;
+        return p.STATE === "51" || p.STATE === 51 || p.STATEFP === "51";
+      })
+    };
+    if (va.features.length > 50) {
+      va.features.forEach(f => {
+        const p = f.properties;
+        const st = String(p.STATE||p.STATEFP||"51").padStart(2,"0");
+        const co = String(p.COUNTY||p.COUNTYFP||"").padStart(3,"0");
+        f.id = st + co;
+      });
+      return simplifyGeojson(va, 0.001);
+    }
+    throw new Error("Too few features: " + va.features.length);
+  } catch(e) { console.warn("Source 2 failed:", e.message); }
+
+  try {
+    setLoader("Fetching Census county boundaries (source 3 — TIGERweb)...");
+    const url = "https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/tigerWMS_ACS2023/MapServer/86/query"
+      + "?where=STATEFP%3D%2751%27&outFields=GEOID,NAME,STATEFP,COUNTYFP&f=geojson&outSR=4326";
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    if (data.features && data.features.length > 50) {
+      data.features.forEach(f => {
+        f.id = f.properties.GEOID || (f.properties.STATEFP + f.properties.COUNTYFP);
+      });
+      return simplifyGeojson(data, 0.001);
+    }
+    throw new Error("Too few features: " + (data.features||[]).length);
+  } catch(e) { console.warn("Source 3 failed:", e.message); }
+
+  throw new Error("Could not load county boundary data from any source");
+}
+
+const VA_COUNTIES = {
+  "51001":{"n":"Accomack","lat":37.763,"lon":-75.632},"51003":{"n":"Albemarle","lat":38.024,"lon":-78.548},
+  "51005":{"n":"Alleghany","lat":37.787,"lon":-79.979},"51007":{"n":"Amelia","lat":37.341,"lon":-77.983},
+  "51009":{"n":"Amherst","lat":37.603,"lon":-79.145},"51011":{"n":"Appomattox","lat":37.367,"lon":-78.813},
+  "51013":{"n":"Arlington","lat":38.878,"lon":-77.101},"51015":{"n":"Augusta","lat":38.175,"lon":-79.128},
+  "51017":{"n":"Bath","lat":38.066,"lon":-79.728},"51019":{"n":"Bedford","lat":37.313,"lon":-79.523},
+  "51021":{"n":"Bland","lat":37.127,"lon":-81.124},"51023":{"n":"Botetourt","lat":37.552,"lon":-79.838},
+  "51025":{"n":"Brunswick","lat":36.764,"lon":-77.863},"51027":{"n":"Buchanan","lat":37.271,"lon":-81.975},
+  "51029":{"n":"Buckingham","lat":37.561,"lon":-78.547},"51031":{"n":"Campbell","lat":37.200,"lon":-79.093},
+  "51033":{"n":"Caroline","lat":38.029,"lon":-77.348},"51035":{"n":"Carroll","lat":36.723,"lon":-80.727},
+  "51036":{"n":"Charles City","lat":37.357,"lon":-77.064},"51037":{"n":"Charlotte","lat":36.996,"lon":-78.678},
+  "51041":{"n":"Chesterfield","lat":37.378,"lon":-77.584},"51043":{"n":"Clarke","lat":39.113,"lon":-77.980},
+  "51045":{"n":"Craig","lat":37.480,"lon":-80.219},"51047":{"n":"Culpeper","lat":38.480,"lon":-77.998},
+  "51049":{"n":"Cumberland","lat":37.510,"lon":-78.242},"51051":{"n":"Dickenson","lat":37.126,"lon":-82.349},
+  "51053":{"n":"Dinwiddie","lat":37.077,"lon":-77.626},"51057":{"n":"Essex","lat":37.927,"lon":-76.983},
+  "51059":{"n":"Fairfax","lat":38.836,"lon":-77.276},"51061":{"n":"Fauquier","lat":38.735,"lon":-77.803},
+  "51063":{"n":"Floyd","lat":36.926,"lon":-80.325},"51065":{"n":"Fluvanna","lat":37.834,"lon":-78.279},
+  "51067":{"n":"Franklin","lat":36.990,"lon":-79.877},"51069":{"n":"Frederick","lat":39.199,"lon":-78.258},
+  "51071":{"n":"Giles","lat":37.322,"lon":-80.699},"51073":{"n":"Gloucester","lat":37.410,"lon":-76.529},
+  "51075":{"n":"Goochland","lat":37.714,"lon":-77.887},"51077":{"n":"Grayson","lat":36.659,"lon":-81.218},
+  "51079":{"n":"Greene","lat":38.300,"lon":-78.467},"51081":{"n":"Greensville","lat":36.676,"lon":-77.567},
+  "51083":{"n":"Halifax","lat":36.772,"lon":-78.941},"51085":{"n":"Hanover","lat":37.757,"lon":-77.484},
+  "51087":{"n":"Henrico","lat":37.438,"lon":-77.291},"51089":{"n":"Henry","lat":36.679,"lon":-79.884},
+  "51091":{"n":"Highland","lat":38.353,"lon":-79.573},"51093":{"n":"Isle of Wight","lat":36.906,"lon":-76.706},
+  "51095":{"n":"James City","lat":37.318,"lon":-76.778},"51097":{"n":"King and Queen","lat":37.720,"lon":-76.893},
+  "51099":{"n":"King George","lat":38.255,"lon":-77.000},"51101":{"n":"King William","lat":37.697,"lon":-77.133},
+  "51103":{"n":"Lancaster","lat":37.704,"lon":-76.423},"51105":{"n":"Lee","lat":36.703,"lon":-83.124},
+  "51107":{"n":"Loudoun","lat":39.077,"lon":-77.639},"51109":{"n":"Louisa","lat":38.031,"lon":-77.984},
+  "51111":{"n":"Lunenburg","lat":36.953,"lon":-78.237},"51113":{"n":"Madison","lat":38.411,"lon":-78.262},
+  "51115":{"n":"Mathews","lat":37.432,"lon":-76.326},"51117":{"n":"Mecklenburg","lat":36.680,"lon":-78.345},
+  "51119":{"n":"Middlesex","lat":37.609,"lon":-76.538},"51121":{"n":"Montgomery","lat":37.175,"lon":-80.390},
+  "51125":{"n":"Nelson","lat":37.793,"lon":-78.889},"51127":{"n":"New Kent","lat":37.512,"lon":-77.002},
+  "51131":{"n":"Northampton","lat":37.336,"lon":-75.943},"51133":{"n":"Northumberland","lat":37.867,"lon":-76.394},
+  "51135":{"n":"Nottoway","lat":37.134,"lon":-78.051},"51137":{"n":"Orange","lat":38.242,"lon":-78.008},
+  "51139":{"n":"Page","lat":38.617,"lon":-78.494},"51141":{"n":"Patrick","lat":36.651,"lon":-80.274},
+  "51143":{"n":"Pittsylvania","lat":36.821,"lon":-79.394},"51145":{"n":"Powhatan","lat":37.548,"lon":-77.912},
+  "51147":{"n":"Prince Edward","lat":37.222,"lon":-78.442},"51149":{"n":"Prince George","lat":37.189,"lon":-77.238},
+  "51153":{"n":"Prince William","lat":38.705,"lon":-77.479},"51155":{"n":"Pulaski","lat":37.066,"lon":-80.721},
+  "51157":{"n":"Rappahannock","lat":38.682,"lon":-78.157},"51159":{"n":"Richmond","lat":37.928,"lon":-76.722},
+  "51161":{"n":"Roanoke","lat":37.285,"lon":-79.938},"51163":{"n":"Rockbridge","lat":37.793,"lon":-79.449},
+  "51165":{"n":"Rockingham","lat":38.504,"lon":-78.874},"51167":{"n":"Russell","lat":36.933,"lon":-81.907},
+  "51169":{"n":"Scott","lat":36.710,"lon":-82.609},"51171":{"n":"Shenandoah","lat":38.862,"lon":-78.568},
+  "51173":{"n":"Smyth","lat":36.840,"lon":-81.543},"51175":{"n":"Southampton","lat":36.735,"lon":-77.098},
+  "51177":{"n":"Spotsylvania","lat":38.187,"lon":-77.658},"51179":{"n":"Stafford","lat":38.423,"lon":-77.452},
+  "51181":{"n":"Surry","lat":37.116,"lon":-76.874},"51183":{"n":"Sussex","lat":36.923,"lon":-77.259},
+  "51185":{"n":"Tazewell","lat":37.123,"lon":-81.553},"51187":{"n":"Warren","lat":38.914,"lon":-78.197},
+  "51191":{"n":"Washington","lat":36.724,"lon":-81.973},"51193":{"n":"Westmoreland","lat":38.117,"lon":-76.807},
+  "51195":{"n":"Wise","lat":36.977,"lon":-82.628},"51197":{"n":"Wythe","lat":36.907,"lon":-81.079},
+  "51199":{"n":"York","lat":37.228,"lon":-76.547}
+};
+
+let map, geojsonLayer;
+let countyRainfall = {};
+let floodCounties  = new Set();
+let floodAlerts    = [];
+let eventDate      = null;
+let nextRainDate   = null;
+
+function initMap() {
+  map = L.map("map", { center:[37.5,-79.4], zoom:7, preferCanvas: false });
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+    attribution:"© OpenStreetMap © CARTO | Data: NOAA/NWS · Boundaries: US Census TIGER 2023",
+    subdomains:"abcd", maxZoom:14
+  }).addTo(map);
+}
+
+function rainColor(in_, flood) {
+  if (flood)            return "#ff4757";
+  if (!in_ || in_<=0)  return "#1a2535";
+  if (in_ < 0.1)       return "#1a3a5c";
+  if (in_ < 0.5)       return "#0077b6";
+  if (in_ < 1.2)       return "#00b4d8";
+  if (in_ < 2.5)       return "#48cae4";
+  return "#90e0ef";
+}
+
+function hasFlood(countyName) {
+  const n = countyName.toLowerCase();
+  return [...floodCounties].some(fc => n.includes(fc) || fc.includes(n.split(" ")[0]));
+}
+
+function renderMap() {
+  if (!VA_GEOJSON) { console.warn("renderMap called before boundaries loaded"); return; }
+  if (geojsonLayer) geojsonLayer.remove();
+  geojsonLayer = L.geoJSON(VA_GEOJSON, {
+    smoothFactor: 1.0,
+    style: f => {
+      const county = VA_COUNTIES[f.id];
+      const flood  = county ? hasFlood(county.n) : false;
+      const rain   = countyRainfall[f.id];
+      return {
+        fillColor:   rainColor(rain, flood),
+        fillOpacity: flood ? 0.90 : (rain > 0 ? 0.75 : 0.30),
+        color:       flood ? "#ff4757" : "#2a3f5a",
+        weight:      flood ? 2.0 : 1.0,
+        lineCap:"round", lineJoin:"round",
+      };
+    },
+    onEachFeature: (f, layer) => {
+      const county = VA_COUNTIES[f.id];
+      if (!county) return;
+      const flood   = hasFlood(county.n);
+      const rain    = countyRainfall[f.id];
+      const rainTxt = rain != null ? rain.toFixed(2)+'"' : "No data";
+      const dateTxt = eventDate ? ` <span style="font-size:0.6rem;color:#64748b">(${eventDate})</span>` : "";
+      const floodHtml = flood
+        ? '<div style="color:#ff4757;margin-top:5px;font-size:0.74rem;font-weight:700">⚠ ACTIVE FLOOD WARNING</div>'
+        : '<div style="color:#00ff9d;margin-top:5px;font-size:0.72rem">✓ No active flood warning</div>';
+      const tip = `<div style="font-family:Inter,sans-serif;background:#0f1923;border:1px solid #2a3f5a;border-radius:8px;padding:11px 14px;color:#e2e8f0;min-width:170px;box-shadow:0 4px 24px rgba(0,0,0,0.5)">
+        <div style="font-weight:700;font-size:0.94rem">${county.n} County</div>
+        <div style="color:#00d4ff;margin-top:5px;font-size:0.82rem">🌧 ${rainTxt}${dateTxt}</div>
+        ${floodHtml}
+      </div>`;
+      layer.bindTooltip(tip, {sticky:true, offset:[14,0], opacity:1.0});
+      layer.on({
+        mouseover: e => {
+          e.target.setStyle({weight: flood ? 2.5 : 1.8, color:"#00d4ff", fillOpacity: 0.92});
+          e.target.bringToFront();
+        },
+        mouseout:  e => { geojsonLayer.resetStyle(e.target); },
+        click: e => { map.fitBounds(e.target.getBounds(), {padding:[40,40], animate:true}); }
+      });
+    }
+  }).addTo(map);
+  if (!map._vaFit) {
+    try { map.fitBounds(geojsonLayer.getBounds(), {padding:[10,10], animate:false}); } catch(e){}
+    map._vaFit = true;
+  }
+}
+
+function renderSidebar() {
+  document.getElementById("alert-section-title").textContent = "⚠ Flash Flood Warnings";
+  document.getElementById("list-title").textContent = "Top Counties · Rainfall";
+
+  const vals = Object.values(countyRainfall).filter(v => v > 0);
+  const maxR = vals.length ? Math.max(...vals) : 0;
+  const avgR = vals.length ? +(vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(2) : 0;
+
+  document.getElementById("stat-alerts").textContent = floodAlerts.length || "0";
+  document.getElementById("stat-max").textContent    = maxR > 0 ? maxR.toFixed(2)+'"' : "—";
+  document.getElementById("stat-avg").textContent    = avgR > 0 ? avgR.toFixed(2)+'"' : "—";
+  if (nextRainDate) {
+    const nd = new Date(nextRainDate + "T12:00:00");
+    document.getElementById("stat-next").textContent = nd.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
+  } else {
+    document.getElementById("stat-next").textContent = "None in forecast";
+  }
+
+  const evEl = document.getElementById("event-label");
+  if (eventDate) {
+    const d    = new Date(eventDate + "T12:00:00");
+    const nice = d.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",year:"numeric"});
+    evEl.textContent = `· Showing precipitation event: ${nice}`;
+    evEl.style.color = "#00d4ff";
+  } else {
+    evEl.textContent = "· No recent precipitation event found";
+    evEl.style.color = "var(--muted)";
+  }
+
+  const ae = document.getElementById("alert-list");
+  if (!floodAlerts.length) {
+    ae.innerHTML = `<div class="no-alerts">✓ No active flood warnings</div>`;
+  } else {
+    ae.innerHTML = floodAlerts.map(f => {
+      const p   = f.properties;
+      const exp = p.expires ? new Date(p.expires).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}) : "—";
+      const areas = (p.areaDesc||"").split(";").slice(0,4).map(s=>s.trim()).join(", ");
+      return `<div class="alert-item">
+        <div class="alert-county">⚠ ${p.event||'Flood Warning'}</div>
+        <div class="alert-event">${areas}</div>
+        <div class="alert-expires">Expires ${exp}</div>
+      </div>`;
+    }).join("");
+  }
+
+  const ranked = Object.entries(countyRainfall).filter(([,v])=>v>0).sort(([,a],[,b])=>b-a).slice(0,20);
+  const re = document.getElementById("rain-list");
+  if (!ranked.length) {
+    re.innerHTML = `<div style="font-family:'Inter',sans-serif;font-size:0.7rem;color:var(--muted);text-align:center;padding:16px">No data available.</div>`;
+    return;
+  }
+  const top = ranked[0][1];
+  re.innerHTML = ranked.map(([fips,val],i) => {
+    const c     = VA_COUNTIES[fips]; if (!c) return "";
+    const flood = hasFlood(c.n);
+    const pct   = (val/top*100).toFixed(1);
+    const col   = flood ? "var(--flood)" : val<0.5 ? "#0077b6" : val<1.5 ? "#00b4d8" : "#90e0ef";
+    return `<div class="rain-item ${flood ? 'has-flood' : ''}"
+        onclick="map.setView([${c.lat},${c.lon}],9,{animate:true})">
+      <div class="rain-rank">${i+1}</div>
+      <div class="rain-bar-wrap">
+        <div class="rain-county-name">${c.n}</div>
+        <div class="rain-bar-bg"><div class="rain-bar-fill" style="width:${pct}%;background:${col}"></div></div>
+      </div>
+      <div class="rain-val">${val.toFixed(2)}"</div>
+      ${flood ? '<div class="flood-badge">FLOOD</div>' : ''}
+    </div>`;
+  }).join("");
+}
+
+async function fetchAlerts() {
+  setLoader("Fetching active flood warnings via NWS...");
+  const res = await fetch("https://api.weather.gov/alerts/active?area=VA", {
+    headers: { "Accept": "application/geo+json" }
+  });
+  if (!res.ok) throw new Error("NWS " + res.status);
+  const data = await res.json();
+  floodAlerts = (data.features || []).filter(f => {
+    const ev = (f.properties.event || "").toLowerCase();
+    return ev.includes("flood");
+  });
+  floodCounties.clear();
+  floodAlerts.forEach(f => {
+    (f.properties.areaDesc || "").split(";").forEach(p => {
+      const t = p.trim().replace(/ County$/, "").replace(/ City$/, "").toLowerCase();
+      if (t) floodCounties.add(t);
+    });
+  });
+}
+
+async function fetchRainfall() {
+  setLoader("Querying Open-Meteo for Virginia precipitation...");
+  const sampleFips = [
+    "51059","51107","51153","51013","51179","51177","51061","51187",
+    "51165","51171","51139","51015","51043","51069","51091","51017",
+    "51003","51113","51079","51137","51109","51047","51033","51085",
+    "51087","51041","51145","51075","51065","51125","51163","51161",
+    "51023","51121","51071","51063","51155","51167","51185","51173",
+    "51191","51105","51195","51027","51169","51035","51143","51083",
+    "51019","51031","51067","51089","51141","51117","51025","51081",
+    "51175","51053","51149","51183","51135","51147","51111","51037",
+    "51073","51095","51127","51101","51099","51097","51057","51159",
+    "51193","51103","51133","51119","51115","51073","51001","51131"
+  ];
+  const lats = sampleFips.map(f => VA_COUNTIES[f] ? VA_COUNTIES[f].lat.toFixed(3) : null).filter(Boolean);
+  const lons = sampleFips.map(f => VA_COUNTIES[f] ? VA_COUNTIES[f].lon.toFixed(3) : null).filter(Boolean);
+  const validFips = sampleFips.filter(f => VA_COUNTIES[f]);
+
+  const url = "https://api.open-meteo.com/v1/forecast" +
+    "?latitude=" + lats.join(",") +
+    "&longitude=" + lons.join(",") +
+    "&daily=precipitation_sum" +
+    "&timezone=America%2FNew_York" +
+    "&past_days=16" +
+    "&forecast_days=7" +
+    "&precipitation_unit=inch";
+
+  setLoader("Fetching precipitation data (" + validFips.length + " counties)...");
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Open-Meteo " + res.status);
+  const raw = await res.json();
+  const responses = Array.isArray(raw) ? raw : [raw];
+
+  const dateCountyMap = {};
+  responses.forEach((loc, i) => {
+    const fips = validFips[i];
+    if (!loc.daily) return;
+    const dates = loc.daily.time;
+    const precip = loc.daily.precipitation_sum;
+    dates.forEach((date, j) => {
+      const mm = precip[j];
+      if (mm === null || mm <= 0) return;
+      if (!dateCountyMap[date]) dateCountyMap[date] = {};
+      dateCountyMap[date][fips] = mm;
+    });
+  });
+
+  const todayStr = new Date().toISOString().split("T")[0];
+  const sortedDates = Object.keys(dateCountyMap).filter(d => d <= todayStr).sort().reverse();
+  if (sortedDates.length === 0) throw new Error("No precipitation in past 16 days");
+
+  let chosenDate = sortedDates[0];
+  for (const d of sortedDates) {
+    if (Object.keys(dateCountyMap[d]).length >= 3) { chosenDate = d; break; }
+  }
+
+  eventDate = chosenDate;
+  countyRainfall = dateCountyMap[chosenDate];
+  const futureDates = Object.keys(dateCountyMap).filter(d => d > todayStr).sort();
+  nextRainDate = null;
+  for (const d of futureDates) {
+    if (Object.keys(dateCountyMap[d]).length >= 2) { nextRainDate = d; break; }
+  }
+  if (!nextRainDate && futureDates.length > 0) nextRainDate = futureDates[0];
+}
+
+function setLoader(msg) {
+  const el = document.getElementById("loader-status");
+  if (el) el.textContent = msg;
+}
+
+function setStatus(label, color) {
+  document.getElementById("status-label").textContent = label;
+  document.getElementById("status-dot").style.background = color;
+}
+
+function updateTimestamp() {
+  document.getElementById("last-updated").textContent =
+    new Date().toLocaleTimeString("en-US",{hour:"2-digit",minute:"2-digit",second:"2-digit"});
+}
+
+async function loadData() {
+  const btn = document.getElementById("refresh-btn");
+  btn.classList.add("spinning");
+  document.getElementById("loader").classList.remove("hidden");
+  setStatus("Loading...", "#f97316");
+
+  try {
+    await fetchAlerts();
+  } catch(e) {
+    console.warn("Alerts error:", e.message);
+    floodAlerts = [];
+    floodCounties.clear();
+  }
+
+  try {
+    await fetchRainfall();
+    const d = new Date(eventDate + "T12:00:00");
+    const nice = d.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});
+    setStatus("Live · Showing data from " + nice, "var(--green)");
+  } catch(e) {
+    console.error("Rainfall error:", e.message);
+    countyRainfall = {
+      "51165":2.31,"51015":1.87,"51107":1.54,"51059":1.41,"51179":1.28,
+      "51061":1.12,"51177":0.98,"51033":0.87,"51085":0.74,"51047":0.68,
+      "51153":0.61,"51003":0.55,"51113":0.49,"51139":0.43,"51171":0.38,
+      "51069":0.32,"51043":0.28,"51187":0.22,"51079":0.17,"51137":0.12
+    };
+    eventDate = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+    const _d = new Date(eventDate + "T12:00:00");
+    const _nice = _d.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});
+    setStatus("Showing data from " + _nice, "#f97316");
+  }
+
+  renderMap();
+  renderSidebar();
+  updateTimestamp();
+  document.getElementById("loader").classList.add("hidden");
+  btn.classList.remove("spinning");
+}
+
+function loadLeaflet() {
+  return new Promise((resolve, reject) => {
+    if (window.L) { resolve(); return; }
+    const s = document.createElement("script");
+    s.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+    s.onload = resolve;
+    s.onerror = () => {
+      const s2 = document.createElement("script");
+      s2.src = "https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.js";
+      s2.onload = resolve; s2.onerror = reject;
+      document.head.appendChild(s2);
+    };
+    document.head.appendChild(s);
+  });
+}
+
+document.addEventListener("DOMContentLoaded", async () => {
+  setLoader("Loading map library...");
+  try {
+    await loadLeaflet();
+    initMap();
+    setLoader("Loading Census county boundaries...");
+    try {
+      VA_GEOJSON = await fetchCountyBoundaries();
+      console.log("County boundaries loaded:", VA_GEOJSON.features.length, "features");
+    } catch(e) {
+      console.error("Boundary fetch failed:", e.message);
+      setLoader("⚠ Could not load county boundaries: " + e.message);
+    }
+    await loadData();
+    setInterval(loadData, 15 * 60 * 1000);
+  } catch(e) {
+    setLoader("Error: " + e.message);
+    console.error(e);
+  }
+});
+</script>
+</body>
+</html>
